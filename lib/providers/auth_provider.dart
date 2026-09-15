@@ -20,9 +20,28 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('accessToken');
     final userData = prefs.getString('user');
-    if (token != null && userData != null) {
+    if (token != null && userData != null && !_isTokenExpired(token)) {
       _user = jsonDecode(userData);
       notifyListeners();
+    } else {
+      await prefs.clear();
+      _user = null;
+      notifyListeners();
+    }
+  }
+
+  bool _isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      final payload = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+      final exp = payload['exp'] as int?;
+      if (exp == null) return false;
+      return DateTime.now().millisecondsSinceEpoch > exp * 1000;
+    } catch (_) {
+      return true;
     }
   }
 

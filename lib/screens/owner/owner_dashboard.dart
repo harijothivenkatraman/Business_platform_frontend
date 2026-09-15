@@ -1,159 +1,254 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../models/member.dart';
+import '../../models/trainer.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/api_service.dart';
+import '../../providers/business_dashboard_provider.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_text_styles.dart';
+import '../../widgets/b2b_data_table.dart';
+import '../../widgets/b2b_kyc_review_card.dart';
+import '../../widgets/b2b_stat_card.dart';
+import '../../widgets/b2b_status_badge.dart';
 
 class OwnerDashboard extends StatefulWidget {
   const OwnerDashboard({super.key});
+
   @override
   State<OwnerDashboard> createState() => _OwnerDashboardState();
 }
 
 class _OwnerDashboardState extends State<OwnerDashboard> {
-  Map<String, dynamic> _stats = {};
-  List<dynamic> _members = [];
-  List<dynamic> _trainers = [];
-  List<dynamic> _kycPending = [];
-  bool _loading = true;
-
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshData());
   }
 
-  Future<void> _loadData() async {
-    setState(() => _loading = true);
-    try {
-      final auth = context.read<AuthProvider>();
-      final bid = auth.businessId;
-      final statsRes = await ApiService.get('/businesses/$bid/stats');
-      final membersRes = await ApiService.get('/businesses/$bid/members');
-      final trainersRes = await ApiService.get('/businesses/$bid/trainers');
-      final kycRes = await ApiService.get('/kyc/pending');
-      setState(() {
-        _stats = statsRes['data'] ?? {};
-        _members = membersRes['data'] ?? [];
-        _trainers = trainersRes['data'] ?? [];
-        _kycPending = kycRes['data'] ?? [];
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() => _loading = false);
+  void _refreshData() {
+    final bid = context.read<AuthProvider>().businessId;
+    if (bid.isNotEmpty) {
+      context.read<BusinessDashboardProvider>().loadDashboard(bid);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    final dashboard = context.watch<BusinessDashboardProvider>();
+
+    if (dashboard.isLoading && dashboard.members.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+      );
+    }
+
     return RefreshIndicator(
-      onRefresh: _loadData,
-      child: ListView(padding: const EdgeInsets.all(16), children: [
-        Text('Dashboard', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 16),
-        _buildStatsGrid(),
-        const SizedBox(height: 24),
-        if (_kycPending.isNotEmpty) ...[
-          Text('Pending KYC Reviews (${_kycPending.length})',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          ..._kycPending.map((k) => Card(
-                child: ListTile(
-                  leading:
-                      const Icon(Icons.verified_user, color: Colors.orange),
-                  title: Text(
-                      'User: ${k['userId']?.toString().substring(0, 8) ?? 'N/A'}'),
-                  subtitle:
-                      Text('Status: ${k['status']} • ${k['documentType']}'),
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    IconButton(
-                        icon: const Icon(Icons.check, color: Colors.green),
-                        onPressed: () => _reviewKyc(k['id'], 'verified')),
-                    IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        onPressed: () => _reviewKyc(k['id'], 'rejected')),
-                  ]),
-                ),
-              )),
-          const SizedBox(height: 24),
-        ],
-        Text('Members (${_members.length})',
-            style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        ..._members.map((m) => Card(
-              child: ListTile(
-                leading: CircleAvatar(child: Text(m['name']?[0] ?? '?')),
-                title: Text(m['name'] ?? ''),
-                subtitle: Text('${m['email']} • KYC: ${m['kycStatus']}'),
-              ),
-            )),
-        const SizedBox(height: 16),
-        Text('Trainers (${_trainers.length})',
-            style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        ..._trainers.map((t) => Card(
-              child: ListTile(
-                leading: CircleAvatar(
-                    backgroundColor: Colors.teal,
-                    child: Text(t['name']?[0] ?? '?')),
-                title: Text(t['name'] ?? ''),
-                subtitle: Text(t['email'] ?? ''),
-              ),
-            )),
-      ]),
-    );
-  }
-
-  Widget _buildStatsGrid() {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.8,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      children: [
-        _statCard('Members', '${_stats['totalMembers'] ?? 0}', Icons.people,
-            Colors.blue),
-        _statCard('Trainers', '${_stats['totalTrainers'] ?? 0}', Icons.sports,
-            Colors.teal),
-        _statCard('Bookings', '${_stats['totalBookings'] ?? 0}',
-            Icons.calendar_today, Colors.orange),
-        _statCard('Revenue', '₹${_stats['totalRevenue'] ?? 0}',
-            Icons.currency_rupee, Colors.green),
-      ],
-    );
-  }
-
-  Widget _statCard(String label, String value, IconData icon, Color color) {
-    return Card(
-      color: color.withOpacity(0.1),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
+      color: AppColors.primary,
+      onRefresh: () async => _refreshData(),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        children: [
+          // Header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(icon, color: color),
-              const SizedBox(height: 8),
-              Text(value,
-                  style: TextStyle(
-                      fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-              Text(label, style: TextStyle(color: color.withOpacity(0.8))),
-            ]),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Enterprise Overview', style: AppTextStyles.h1),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Real-time metrics, members, and verification requests.',
+                    style: AppTextStyles.subtitle,
+                  ),
+                ],
+              ),
+              FilledButton.tonalIcon(
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Refresh'),
+                onPressed: _refreshData,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // Stat Cards Grid
+          LayoutBuilder(
+            builder: (ctx, constraints) {
+              final crossAxisCount = constraints.maxWidth > 1100
+                  ? 4
+                  : constraints.maxWidth > 650
+                      ? 2
+                      : 1;
+
+              return GridView.count(
+                crossAxisCount: crossAxisCount,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                childAspectRatio: crossAxisCount == 4 ? 1.5 : 2.0,
+                children: [
+                  B2BStatCard(
+                    title: 'Total Members',
+                    value: '${dashboard.stats.totalMembers}',
+                    icon: Icons.people_alt_rounded,
+                    iconColor: AppColors.accent,
+                    trend: dashboard.stats.memberGrowthPct,
+                    trendLabel: 'vs last month',
+                  ),
+                  B2BStatCard(
+                    title: 'Active Trainers',
+                    value: '${dashboard.stats.totalTrainers}',
+                    icon: Icons.fitness_center_rounded,
+                    iconColor: AppColors.primary,
+                    trend: 5.0,
+                    trendLabel: 'staff capacity',
+                  ),
+                  B2BStatCard(
+                    title: 'Completed Bookings',
+                    value: '${dashboard.stats.totalBookings}',
+                    icon: Icons.calendar_today_rounded,
+                    iconColor: AppColors.success,
+                    trend: 14.2,
+                    trendLabel: 'sessions held',
+                  ),
+                  B2BStatCard(
+                    title: 'Total Revenue',
+                    value: '₹${dashboard.stats.totalRevenue.toStringAsFixed(0)}',
+                    icon: Icons.currency_rupee_rounded,
+                    iconColor: AppColors.warning,
+                    trend: dashboard.stats.revenueGrowthPct,
+                    trendLabel: 'ARR trajectory',
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 32),
+
+          // Pending KYC Reviews Section
+          if (dashboard.pendingKyc.isNotEmpty) ...[
+            Row(
+              children: [
+                const Icon(Icons.verified_user_outlined, color: AppColors.warning, size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  'Pending KYC Verifications (${dashboard.pendingKyc.length})',
+                  style: AppTextStyles.h2,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...dashboard.pendingKyc.map((kyc) => B2BKYCReviewCard(
+                  record: kyc,
+                  onReview: (id, status, notes) async {
+                    final ok = await dashboard.reviewKyc(id, status, notes: notes);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(ok ? 'KYC application $status' : 'Action failed'),
+                          backgroundColor: status == 'verified' ? AppColors.success : AppColors.danger,
+                        ),
+                      );
+                    }
+                  },
+                )),
+            const SizedBox(height: 32),
+          ],
+
+          // Members Data Table
+          B2BDataTable(
+            title: 'Registered Members',
+            searchHint: 'Search members by name or email...',
+            columns: const [
+              B2BDataTableColumn(title: 'Member', flex: 3),
+              B2BDataTableColumn(title: 'Contact', flex: 3),
+              B2BDataTableColumn(title: 'KYC Status', flex: 2),
+            ],
+            rows: dashboard.members.map((Member m) {
+              return B2BDataTableRow(
+                searchTerms: '${m.name} ${m.email}',
+                cells: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: AppColors.accent.withOpacity(0.15),
+                        child: Text(
+                          m.name.isNotEmpty ? m.name[0].toUpperCase() : 'M',
+                          style: const TextStyle(
+                            color: AppColors.accent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(m.name, style: AppTextStyles.bodyMedium),
+                    ],
+                  ),
+                  Text(m.email, style: AppTextStyles.subtitle),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: B2BStatusBadge.fromKyc(m.kycStatus),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 32),
+
+          // Trainers Data Table
+          B2BDataTable(
+            title: 'Training Staff',
+            searchHint: 'Search trainers by name or spec...',
+            columns: const [
+              B2BDataTableColumn(title: 'Trainer', flex: 3),
+              B2BDataTableColumn(title: 'Email', flex: 3),
+              B2BDataTableColumn(title: 'Specialization', flex: 2),
+            ],
+            rows: dashboard.trainers.map((Trainer t) {
+              return B2BDataTableRow(
+                searchTerms: '${t.name} ${t.email} ${t.specialization}',
+                cells: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: AppColors.primary.withOpacity(0.1),
+                        child: Text(
+                          t.name.isNotEmpty ? t.name[0].toUpperCase() : 'T',
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(t.name, style: AppTextStyles.bodyMedium),
+                    ],
+                  ),
+                  Text(t.email, style: AppTextStyles.subtitle),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Text(
+                      t.specialization ?? 'Fitness Coach',
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
-  }
-
-  Future<void> _reviewKyc(String id, String status) async {
-    try {
-      await ApiService.put('/kyc/$id/review', {'status': status});
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('KYC $status')));
-      _loadData();
-    } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
   }
 }
